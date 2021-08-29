@@ -3,6 +3,10 @@
 Created on Sun Aug 29 13:22:25 2021
 
 @author: matth
+
+github token: 
+
+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
 """
 
 import socket
@@ -13,9 +17,6 @@ import numpy as np
 from threading import Thread
 
 
-
-HOST = '0.0.0.0' # Server IP or Hostname
-PORT = 12352 # Pick an open Port (1000+ recommended), must match the client sport
 
 def degree_to_Pulse(angle,min_angle=-80,max_angle=80,min_pulse=50,max_pulse=1850,min_allowed_pulse=50,max_allowed_pulse=1850):
 	print('angle: ',angle)
@@ -31,6 +32,7 @@ def degree_to_Pulse(angle,min_angle=-80,max_angle=80,min_pulse=50,max_pulse=1850
 
 class solarschaf:
 	def __init__(self):
+		
 		laptop_thread=Thread(target=self.laptop_communication)
 		laptop_thread.start()
 		
@@ -72,6 +74,10 @@ class solarschaf:
     
 	def laptop_communication(self):
 		
+		
+
+		HOST = '0.0.0.0' # Server IP or Hostname
+		PORT = 12352 # Pick an open Port (1000+ recommended), must match the client sport
 		
 		# initialize serial connection to laptop
 		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
