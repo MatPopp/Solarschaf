@@ -4,9 +4,8 @@ Created on Sun Aug 29 13:22:25 2021
 
 @author: matth
 
-github token: 
 
-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
+
 """
 
 import socket
