@@ -1,0 +1,1 @@
+lxterminal -e ffmpeg -f v4l2 -r 25 -s 1280x960 -i /dev/video0 video4.avi
