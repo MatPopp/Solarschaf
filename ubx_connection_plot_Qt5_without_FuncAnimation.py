@@ -31,6 +31,8 @@ class MainWindow(QMainWindow):
         loadUi('QtMatplotlib.ui',self)
         
         
+        self.mode='manual'
+        self.next_waypoint_index=0
         
         self.lat_list=[]
         self.long_list=[]
@@ -41,30 +43,36 @@ class MainWindow(QMainWindow):
         self.vx_list=[]
         self.vy_list=[]
         read_thread=threading.Thread(target=self.read_u_blox)
-        read_thread=threading.Thread(target=self.simulate_read_with_keyboard)
+        read_thread=threading.Thread(target=self.simulate_read)
+        
+        
         read_thread.start()
         
         ## start plot loop. This cannot be in a seperate Thread since matplotlib can only be used in main thread
-        #self.plot_lat_long_with_loop()
-        self.init_plot_lat_long()
+        #self.plot_long_lat_with_loop()
+        self.init_plot_long_lat()
         
-        self.update_simulation_button.clicked.connect(self.init_plot_lat_long)
+        self.update_simulation_button.clicked.connect(self.init_plot_long_lat)
         self.record_point_button.clicked.connect(self.record_point)
         
         self.timer=QTimer()
-        self.timer.timeout.connect(self.update_plot_lat_long)
-        self.timer.start(10)
+        self.timer.timeout.connect(self.update_plot_long_lat)
+        self.timer.start(50)
         
-        #self.update_simulation_button.clicked.connect(self.update_plot_lat_long)
+        #self.update_simulation_button.clicked.connect(self.update_plot_long_lat)
         
         
     def on_manual_mode_button_clicked(self):
         self.manual_mode_button.setStyleSheet("background-color: green")
         self.auto_mode_button.setStyleSheet("background-color: None")
+        self.mode='manual'
         
     def on_auto_mode_button_clicked(self):
-        self.manual_mode_button.setStyleSheet("background-color: None")
-        self.auto_mode_button.setStyleSheet("background-color: green")
+        
+        if len(self.waypoint_long_list)>0:
+            self.manual_mode_button.setStyleSheet("background-color: None")
+            self.auto_mode_button.setStyleSheet("background-color: green")
+            self.mode='auto'
         
         
     def read_u_blox(self):
@@ -89,34 +97,9 @@ class MainWindow(QMainWindow):
                 print('velocity down: ',parsed_data.velD*1e-3)
    
     
+
+        
     def simulate_read(self):
-        
-        dt=1
-        self.sim_vx=1
-        self.sim_vy=1
-        self.sim_x=0
-        self.sim_y=0
-        
-        ## random walk
-        while not keyboard.is_pressed('q'):
-            
-            self.sim_x+=self.sim_vx
-            self.sim_y+=self.sim_vy
-            
-            self.sim_vx=np.random.randn()
-            self.sim_vy=np.random.randn()
-            
-            self.lat_list.append(self.sim_x)
-            self.long_list.append(self.sim_y)
-            
-            self.vx_list.append(self.sim_vx)
-            self.vy_list.append(self.sim_vy)
-            
-            print('added lat, long ',self.lat_list[-1],self.long_list[-1])
-            print('added vx, vy ',self.vx_list[-1],self.vy_list[-1])
-            time.sleep(dt)
-        
-    def simulate_read_with_keyboard(self):
         
         dt=0.1
         self.sim_v=0
@@ -124,50 +107,59 @@ class MainWindow(QMainWindow):
         self.sim_x=0
         self.sim_y=0
         self.sim_phi = 0
-        self.sim_gamma_v = 5
-        self.sim_gamma_omega = 10
-        
+        self.sim_tau_v = 0.2
+        self.sim_tau_omega=0.2
         self.sim_mass=100
         self.sim_m_o_inertia = 10
         
         self.stdev=1 ### standard deviation of measurement values in m 
         
-        motor_speed=1
-        steering_ratio=1
-        set_left=0
-        set_right=0
+        self.motor_speed=10
+        self.steering_ratio=0.1
+        self.straight_steering_ratio = 0.3
+        self.motor_left=0
+        self.motor_right=0
         
         ## random walk
         while not keyboard.is_pressed('q'):
             
-            ## check keyboard and send messages accordingly
-            
+            if self.mode=='manual':
+                print('manual mode')
+                ## check keyboard and send messages accordingly
                 
-            if keyboard.is_pressed('up'):
-                motor_left=motor_speed
-                motor_right=motor_speed
+                    
+                if keyboard.is_pressed('up'):
+                    self.motor_left=self.motor_speed
+                    self.motor_right=self.motor_speed
+                    
+                elif keyboard.is_pressed('down'):
+                    self.motor_left=-self.motor_speed
+                    self.motor_right=-self.motor_speed
+                else:
+                    self.motor_left=0
+                    self.motor_right=0
+                    
+                if keyboard.is_pressed('left'):
+                    self.motor_left-=self.motor_speed*self.steering_ratio
+                    self.motor_right+=self.motor_speed*self.steering_ratio
+                if keyboard.is_pressed('right'):
+                    self.motor_left+=self.motor_speed*self.steering_ratio
+                    self.motor_right-=self.motor_speed*self.steering_ratio
                 
-            elif keyboard.is_pressed('down'):
-                motor_left=-motor_speed
-                motor_right=-motor_speed
-            else:
-                motor_left=0
-                motor_right=0
                 
-            if keyboard.is_pressed('left'):
-                motor_left-=motor_speed*steering_ratio
-                motor_right+=motor_speed*steering_ratio
-            if keyboard.is_pressed('right'):
-                motor_left+=motor_speed*steering_ratio
-                motor_right-=motor_speed*steering_ratio
+                
+                
+            if self.mode=='auto':
+                print('auto mode')
+                self.calculate_auto()
+                
             
+            self.sim_v += (self.motor_left+self.motor_right)/self.sim_mass 
+            self.sim_v -= self.sim_v*dt/self.sim_tau_v
+            self.sim_omega += (self.motor_right-self.motor_left)/self.sim_m_o_inertia
+            self.sim_omega -= self.sim_omega*dt/self.sim_tau_omega
             
-            set_left=motor_left
-            set_right=motor_right
-            
-            self.sim_v += (set_left+set_right)/self.sim_mass - self.sim_v*self.sim_gamma_v/self.sim_mass
-            self.sim_omega += (set_right-set_left)/self.sim_m_o_inertia - self.sim_omega*self.sim_gamma_omega/self.sim_m_o_inertia
-
+            print('sim_omega:',self.sim_omega)
             
             self.sim_vx=self.sim_v*np.cos(self.sim_phi)
             self.sim_vy=self.sim_v*np.sin(self.sim_phi)
@@ -176,9 +168,15 @@ class MainWindow(QMainWindow):
             self.sim_x+=self.sim_vx
             self.sim_y+=self.sim_vy
             self.sim_phi +=self.sim_omega
+            if self.sim_phi>np.pi:
+                self.sim_phi-=2*np.pi
+                
+            if self.sim_phi<-np.pi:
+                self.sim_phi+=2*np.pi
             
-            self.lat_list.append(self.sim_x)
-            self.long_list.append(self.sim_y)
+            print('sim_phi',self.sim_phi)
+            self.long_list.append(self.sim_x)            
+            self.lat_list.append(self.sim_y)
             
             self.vx_list.append(self.sim_vx)
             self.vy_list.append(self.sim_vy)
@@ -187,8 +185,71 @@ class MainWindow(QMainWindow):
           #  print('added vx, vy ',self.vx_list[-1],self.vy_list[-1])
             time.sleep(dt)
             
+    def calculate_auto(self,delta_phi_turn=90/180*np.pi,d_min=0.1):
+        self.d_min=d_min
         
-    def init_plot_lat_long(self,blit=True):
+        if self.next_waypoint_index >= len(self.waypoint_lat_list):
+            self.next_waypoint_index =0
+        
+        
+        ## calculate relative deviation        
+        
+        self.delta_long=self.waypoint_long_list[self.next_waypoint_index]-self.long_list[-1]
+        self.delta_lat=self.waypoint_lat_list[self.next_waypoint_index]-self.lat_list[-1]
+        
+        self.delta_abs = np.sqrt(self.delta_lat**2+self.delta_long**2)
+        
+        ## calculate angle
+        self.target_phi = np.arctan(self.delta_lat/self.delta_long)
+        if self.delta_long<0 and self.delta_lat>0:
+            self.target_phi+=np.pi
+            
+        if self.delta_long<0 and self.delta_lat<0:
+            self.target_phi-=np.pi
+         
+        self.delta_phi=self.target_phi-self.sim_phi
+        
+        if self.delta_phi>np.pi:
+            self.delta_phi-=2*np.pi
+        if self.delta_phi<-np.pi:
+            self.delta_phi+=2*np.pi
+        
+        
+        
+        
+       # print('delta_lat',self.delta_lat,'delta_long',self.delta_long)
+        print('next_waypoint_index',self.next_waypoint_index)
+        print('phi',self.sim_phi,'target_phi',self.target_phi,'delta_phi',self.delta_phi)
+        ## if angle is too high, just turn
+        
+        if self.delta_phi <-delta_phi_turn:
+            ## turn right
+            print('right')
+            self.motor_right=-self.steering_ratio*(self.motor_speed+0.1*self.motor_speed)
+            self.motor_left=+self.steering_ratio*(self.motor_speed+0.1*self.motor_speed)
+
+        elif self.delta_phi > delta_phi_turn:   
+            
+            ## turn left
+            print('left')
+            self.motor_right=self.steering_ratio*(self.motor_speed+0.1*self.motor_speed)
+            self.motor_left=-self.steering_ratio*(self.motor_speed+0.1*self.motor_speed)
+            
+        else:
+            ## go forward
+            
+            print('forward')
+            
+            self.motor_right=self.motor_speed*(1+self.delta_phi*self.straight_steering_ratio)
+            self.motor_left=self.motor_speed*(1-self.delta_phi*self.straight_steering_ratio)
+            
+        if self.delta_abs<self.d_min:
+            self.next_waypoint_index+=1
+    
+        
+        
+        
+    def init_plot_long_lat(self,blit=True):
         self.blit=blit
         
         
@@ -201,19 +262,18 @@ class MainWindow(QMainWindow):
             self.plot_widget.canvas.axes.set_ylim(-5, 5)
         
         else:
-            self.points, = self.plot_widget.canvas.axes.plot(self.lat_list[-100::], self.long_list[-100::], 'ro')
-            self.line, = self.plot_widget.canvas.axes.plot(self.lat_list[-100::], self.long_list[-100::],linewidth=1,color='lightblue')
+            self.points, = self.plot_widget.canvas.axes.plot( self.long_list[-100::],self.lat_list[-100::], 'ro')
+            self.line, = self.plot_widget.canvas.axes.plot( self.long_list[-100::],self.lat_list[-100::],linewidth=1,color='lightblue')
 #            self.plot_widget.canvas.axes.relim()
 #            self.plot_widget.canvas.axes.autoscale_view()
 #            self.plot_widget.canvas.axes.autoscale_view()
 #            self.plot_widget.canvas.axes.autoscale_view()
             
-            self.plot_widget.canvas.axes.set_xlim(min(self.lat_list)-1,max(self.lat_list)+1)
-            self.plot_widget.canvas.axes.set_ylim(min(self.long_list)-1,max(self.long_list)+1)
+            self.plot_widget.canvas.axes.set_xlim(min(self.long_list)-1,max(self.long_list)+1)
+            self.plot_widget.canvas.axes.set_ylim(min(self.lat_list)-1,max(self.lat_list)+1)
             self.plot_widget.canvas.draw()
-        self.plot_widget.canvas.axes.set_xlabel(r'$x$')
-        self.plot_widget.canvas.axes.set_ylabel(r'$y$')
-        print('bin vor Funk def')
+        self.plot_widget.canvas.axes.set_xlabel(r'$long$')
+        self.plot_widget.canvas.axes.set_ylabel(r'$lat$')
         
         
         self.arrow=self.plot_widget.canvas.axes.annotate('',xy=(0,1),xytext=(0,0),arrowprops={'arrowstyle':'->'})
@@ -222,21 +282,20 @@ class MainWindow(QMainWindow):
             self.axbackground = self.plot_widget.canvas.copy_from_bbox(self.plot_widget.canvas.axes.bbox)
       
         
-    def update_plot_lat_long(self):
-        print('bin in update')
+    def update_plot_long_lat(self):
         
         if len(self.lat_list)<100:
-            self.points.set_data(self.lat_list, self.long_list)
-            self.line.set_data(self.lat_list, self.long_list)
+            self.points.set_data(self.long_list,self.lat_list)
+            self.line.set_data(self.long_list,self.lat_list)
             
         else:
-            self.points.set_data(self.lat_list[-100::], self.long_list[-100::])
-            self.line.set_data(self.lat_list[-100::], self.long_list[-100::])
+            self.points.set_data(self.long_list[-100::],self.lat_list[-100::])
+            self.line.set_data(self.long_list[-100::],self.lat_list[-100::])
         if len(self.lat_list)>2:
            # self.plot_widget.canvas.axes.set_xlim(min(self.lat_list)-1,max(self.lat_list)+1)
            # self.plot_widget.canvas.axes.set_ylim(min(self.long_list)-1,max(self.long_list)+1)
-            self.arrow.set_position((self.lat_list[-1],self.long_list[-1]))
-            self.arrow.xy=(self.lat_list[-1]+self.vx_list[-1],self.long_list[-1]+self.vy_list[-1])
+            self.arrow.set_position((self.long_list[-1],self.lat_list[-1]))
+            self.arrow.xy=(self.long_list[-1]+self.vx_list[-1],self.lat_list[-1]+self.vy_list[-1])
             self.plot_widget.fig.canvas.draw()
             
             if self.blit:
@@ -259,11 +318,12 @@ class MainWindow(QMainWindow):
     def record_point(self):
         
         print('point recorded')
-        self.waypoint_lat_list.append(self.lat_list[-1])
         self.waypoint_long_list.append(self.long_list[-1])
         
+        self.waypoint_lat_list.append(self.lat_list[-1])
         
-        self.waypoints, = self.plot_widget.canvas.axes.plot(self.waypoint_lat_list, self.waypoint_long_list,'ro',markersize=10,color='blue')
+        
+        self.waypoints, = self.plot_widget.canvas.axes.plot( self.waypoint_long_list,self.waypoint_lat_list,'ro',markersize=10,color='blue')
         self.plot_widget.canvas.axes.draw_artist(self.waypoints)
         
         if self.blit:
