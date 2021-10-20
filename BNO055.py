@@ -186,10 +186,20 @@ class BNO055:
 
 
 	def __init__(self, sensorId=-1, address=0x28):
+		self.initialize()
 		self._sensorId = sensorId
 		self._address = address
 		self._mode = BNO055.OPERATION_MODE_NDOF
-
+	
+	def initialize(self):
+		GPIO.setwarnings(False)
+		GPIO.setmode(GPIO.BCM)
+		GPIO.setup(17,GPIO.OUT)
+		GPIO.output(17, GPIO.LOW)
+		time.sleep(1)
+		GPIO.output(17, GPIO.HIGH)
+		time.sleep(1)
+		return(1)
 
 	def begin(self, mode=None):
 		if mode is None: mode = BNO055.OPERATION_MODE_NDOF
@@ -284,14 +294,9 @@ class BNO055:
 
 
 if __name__ == '__main__':
-	GPIO.setwarnings(False)
-	GPIO.setmode(GPIO.BCM)
-	GPIO.setup(17,GPIO.OUT)
-	GPIO.output(17, GPIO.LOW)
-	time.sleep(1)
-	GPIO.output(17, GPIO.HIGH)
-	time.sleep(1)
+	
 	bno = BNO055()
+	#bno.reset()
 	if bno.begin() is not True:
 		print("Error initializing device")
 		exit()
