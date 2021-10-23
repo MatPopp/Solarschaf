@@ -24,6 +24,7 @@ from PyQt5.QtCore import QTimer
     
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
 
+import BNO055
 
 
 
@@ -33,8 +34,24 @@ class MainWindow(QMainWindow):
         
         loadUi('QtMatplotlib.ui',self)
         
+        self.left_button_clicked=False
+        self.right_button_clicked=False
+        self.forward_button_clicked=False
+        self.backward_button_clicked=False
+        
+        self.left_button.pressed.connect(self.left_clicked)
+        self.right_button.pressed.connect(self.right_clicked)
+        self.forward_button.pressed.connect(self.forward_clicked)
+        self.backward_button.pressed.connect(self.backward_clicked)
+        
+        self.left_button.released.connect(self.left_released)
+        self.right_button.released.connect(self.right_released)
+        self.forward_button.released.connect(self.forward_released)
+        self.backward_button.released.connect(self.backward_released)
+        
         
         self.mode='manual'
+        self.simulate=False
         self.receiver_connected=False
         self.next_waypoint_index=0
         
@@ -55,16 +72,35 @@ class MainWindow(QMainWindow):
         
         self.vx_list=[]
         self.vy_list=[]
+        self.phi_list=[]
+        self.alpha=0
+        self.beta=0
+        self.gamma=0
+        
+        self.motor_left=0
+        self.motor_right=0
+        
         
         
         read_thread=threading.Thread(target=self.read_u_blox)
         read_thread.start()
         
+        
+        
         time.sleep(0.5)
         if not self.receiver_connected:
             print('could not connect to u-blox, start simulation')
-            read_thread=threading.Thread(target=self.simulate_read)
-            read_thread.start()
+        main_control_thread=threading.Thread(target=self.main_control)
+        main_control_thread.start()
+            
+        ## start reading the orientation sensor
+        self.init_euler()
+        self.angle_timer=QTimer()
+        self.angle_timer.timeout.connect(self.read_euler)
+        self.angle_timer.start(100)
+        
+        ## start reading the ultrasonic sensors
+        
         
         ## start plot loop. This cannot be in a seperate Thread since matplotlib can only be used in main thread
         #self.plot_x_y_with_loop()
@@ -78,7 +114,35 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.update_plot_x_y)
         self.timer.start(50)
         
+        
+        
         #self.update_simulation_button.clicked.connect(self.update_plot_x_y)
+    
+    def left_clicked(self):
+        self.left_button_clicked=True
+        
+    def right_clicked(self):
+        self.right_button_clicked=True
+        
+    def forward_clicked(self):
+        self.forward_button_clicked=True
+        
+    def backward_clicked(self):
+        self.backward_button_clicked=True
+        
+        
+    def left_released(self):
+        self.left_button_clicked=False
+        
+    def right_released(self):
+        self.right_button_clicked=False
+        
+    def forward_released(self):
+        self.forward_button_clicked=False
+        
+    def backward_released(self):
+        self.backward_button_clicked=False
+        
         
         
     def on_manual_mode_button_clicked(self):
@@ -144,17 +208,17 @@ class MainWindow(QMainWindow):
                     #print(parsed_data)
                     
                     long=parsed_data.lon*1e-7
-                    print('lon:',long)
+                    #print('lon:',long)
                     self.long_list.append(parsed_data.lon*1e-7)
                     
                     lat=parsed_data.lat*1e-7
-                    print('lat:',lat)
+                    #print('lat:',lat)
                     self.lat_list.append(lat)
                     
                     height=parsed_data.height*1e-3
-                    print('height:',height)
+                    #print('height:',height)
                     
-                    print('height over mean sea level: ',parsed_data.hMSL*1e-3)
+                    #print('height over mean sea level: ',parsed_data.hMSL*1e-3)
                     
                     self.x_0,self.y_0 = self.long_lat_height_to_x_y(self.long_list[0],self.lat_list[0],0)
                     x_curr,y_curr = self.long_lat_height_to_x_y(long,lat,0)
@@ -167,15 +231,59 @@ class MainWindow(QMainWindow):
                     
                     
                     v_east = parsed_data.velE*1e-3
-                    print('velocity east: ',v_east)
+                    #print('velocity east: ',v_east)
                     self.vx_list.append(v_east)
-                    print('velocity down: ',parsed_data.velD*1e-3)
+                    #print('velocity down: ',parsed_data.velD*1e-3)
                     
                     v_north=parsed_data.velN*1e-3
-                    print('velocity north: ',v_north)                    
+                    #print('velocity north: ',v_north)                    
                     self.vy_list.append(v_north)
-   
+                    
+                    
+                    phi=np.pi/180*(90-self.alpha)
+                    if phi>np.pi:
+                        phi-=2*np.pi
+                
+                    if phi<-np.pi:
+                        phi+=2*np.pi
+                    self.phi_list.append(phi)
+                    
+    def init_motor(self):
+        
+        baud = 115200
+        port='/dev/ttyUSB0'
+        self.motor_serial =serial.Serial(port,baud,timeout=0.005)
+        print(self.motor_serial.name,'motor connection established')
+        
     
+    def set_motor(self,left,right):
+            command = 'l'+str(int(set_left))+'r'+str(int(set_right))+'\n'
+            self.motor_serial.write(bytes(command,'utf-8'))
+            reply = s.read(1000)
+            print (reply)
+        
+                    
+    def init_euler(self):
+        self.bno=BNO055.BNO055()
+        #bno.reset()
+        if self.bno.begin() is not True:
+            print("Error initializing device")
+            exit()
+        time.sleep(1)
+        self.bno.setExternalCrystalUse(False)
+        print('initializing euler finished')
+        
+        self.alpha=0
+        self.beta=0
+        self.gamma=0
+        self.euler_available=True
+        
+        
+    def read_euler(self):
+        
+        self.alpha, self.beta,self.gamma = self.bno.getVector(BNO055.BNO055.VECTOR_EULER)
+        #print(self.alpha,self.beta,self.gamma)
+            
     def long_lat_height_to_x_y(self,long,lat,height):
         
         phi = long/180*np.pi
@@ -189,7 +297,8 @@ class MainWindow(QMainWindow):
         
         return(x,y)
         
-    def simulate_read(self):
+        
+    def main_control(self):
         
         dt=0.1
         self.sim_v=0
@@ -204,37 +313,47 @@ class MainWindow(QMainWindow):
         
         self.stdev=1 ### standard deviation of measurement values in m 
         
-        self.motor_speed=10
-        self.steering_ratio=0.1
-        self.straight_steering_ratio = 0.3
-        self.motor_left=0
-        self.motor_right=0
+        if self.simulate==True:
+            self.motor_speed=10
+            self.steering_ratio=0.1
+            self.straight_steering_ratio = 0.3
+            
+            
+        else:
+            self.motor_speed=20
+            self.steering_ratio=1
+            self.straight_steering_ratio = 0.3
         
         ## random walk
         while not keyboard.is_pressed('q'):
             
             if self.mode=='manual':
-                print('manual mode')
+                #print('manual mode')
                 ## check keyboard and send messages accordingly
                 
                     
-                if keyboard.is_pressed('up'):
-                    self.motor_left=self.motor_speed
-                    self.motor_right=self.motor_speed
                     
-                elif keyboard.is_pressed('down'):
-                    self.motor_left=-self.motor_speed
-                    self.motor_right=-self.motor_speed
-                else:
-                    self.motor_left=0
-                    self.motor_right=0
+                if self.forward_button_clicked :
+                    self.motor_left+=1
+                    self.motor_right+=1
                     
-                if keyboard.is_pressed('left'):
-                    self.motor_left-=self.motor_speed*self.steering_ratio
-                    self.motor_right+=self.motor_speed*self.steering_ratio
-                if keyboard.is_pressed('right'):
-                    self.motor_left+=self.motor_speed*self.steering_ratio
-                    self.motor_right-=self.motor_speed*self.steering_ratio
+                elif self.backward_button_clicked :
+                    
+                    self.motor_left -=1
+                    self.motor_right -=1
+                
+                    
+                elif self.left_button_clicked :
+                    self.motor_left-=2*self.steering_ratio
+                    self.motor_right+=1*self.steering_ratio
+                    
+                elif self.right_button_clicked :
+                    self.motor_left+=1*self.steering_ratio
+                    self.motor_right-=2*self.steering_ratio
+                    
+                else: 
+                    self.motor_left=0.5*self.motor_left
+                    self.motor_right=0.5*self.motor_right
                 
                 
                 
@@ -248,40 +367,50 @@ class MainWindow(QMainWindow):
                 
                 self.calculate_drive_to_point(self.target_x,self.target_y,d_min=0.1)
                 
+            if not self.simulate:
+                print('set motor to l/r ',self.motor_left,self.motor_right)
+                #self.set_motor(motor_left,motor_right)
                 
-            
-            self.sim_v += (self.motor_left+self.motor_right)/self.sim_mass 
-            self.sim_v -= self.sim_v*dt/self.sim_tau_v
-            self.sim_omega += (self.motor_right-self.motor_left)/self.sim_m_o_inertia
-            self.sim_omega -= self.sim_omega*dt/self.sim_tau_omega
-            
-            print('sim_omega:',self.sim_omega)
-            
-            self.sim_vx=self.sim_v*np.cos(self.sim_phi)
-            self.sim_vy=self.sim_v*np.sin(self.sim_phi)
+            if self.simulate:
+                self.sim_v += (self.motor_left+self.motor_right)/self.sim_mass 
+                self.sim_v -= self.sim_v*dt/self.sim_tau_v
+                self.sim_omega += (self.motor_right-self.motor_left)/self.sim_m_o_inertia
+                self.sim_omega -= self.sim_omega*dt/self.sim_tau_omega
             
             
-            self.sim_x+=self.sim_vx
-            self.sim_y+=self.sim_vy
-            self.sim_phi +=self.sim_omega
+                print('sim_omega:',self.sim_omega)
+            
+                self.sim_vx=self.sim_v*np.cos(self.sim_phi)
+                self.sim_vy=self.sim_v*np.sin(self.sim_phi)
+            
+            
+                self.sim_x+=self.sim_vx
+                self.sim_y+=self.sim_vy
+                self.sim_phi +=self.sim_omega
+            else:
+                self.sim_phi=np.pi/180*(90-self.alpha)
+                  
+            
             if self.sim_phi>np.pi:
                 self.sim_phi-=2*np.pi
                 
             if self.sim_phi<-np.pi:
                 self.sim_phi+=2*np.pi
             
-            print('sim_phi',self.sim_phi)
-            self.x_list.append(self.sim_x)            
-            self.y_list.append(self.sim_y)
+            if self.simulate:
             
-            self.long_list.append(self.sim_x)
-            self.lat_list.append(self.sim_y)
+                print('sim_phi',self.sim_phi)
+                self.x_list.append(self.sim_x)            
+                self.y_list.append(self.sim_y)
+                
+                self.long_list.append(self.sim_x)
+                self.lat_list.append(self.sim_y)
+                
+                self.vx_list.append(self.sim_vx)
+                self.vy_list.append(self.sim_vy)
+                self.phi_list.append(self.sim_phi)
+                
             
-            self.vx_list.append(self.sim_vx)
-            self.vy_list.append(self.sim_vy)
-            
-          #  print('added lat, long ',self.y_list[-1],self.x_list[-1])
-          #  print('added vx, vy ',self.vx_list[-1],self.vy_list[-1])
             time.sleep(dt)
           
             
@@ -432,7 +561,14 @@ class MainWindow(QMainWindow):
            # self.plot_widget.canvas.axes.set_xlim(min(self.y_list)-1,max(self.y_list)+1)
            # self.plot_widget.canvas.axes.set_ylim(min(self.x_list)-1,max(self.x_list)+1)
             self.arrow.set_position((self.x_list[-1],self.y_list[-1]))
-            self.arrow.xy=(self.x_list[-1]+self.vx_list[-1],self.y_list[-1]+self.vy_list[-1])
+            
+            phi=self.phi_list[-1]
+            x_norm=0.1*np.cos(phi)
+            y_norm=0.1*np.sin(phi)
+            
+            print('x_norm,y_norm',x_norm,y_norm)
+            self.arrow.xy=(self.x_list[-1]+x_norm,self.y_list[-1]+y_norm)
+            
             self.plot_widget.fig.canvas.draw()
             
             if self.blit:
