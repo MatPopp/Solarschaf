@@ -194,11 +194,12 @@ class BNO055:
 	def initialize(self):
 		GPIO.setwarnings(False)
 		GPIO.setmode(GPIO.BCM)
-		GPIO.setup(17,GPIO.OUT)
-		GPIO.output(17, GPIO.LOW)
+		GPIO.setup(4,GPIO.OUT)
+		GPIO.output(4, GPIO.LOW)
 		time.sleep(1)
-		GPIO.output(17, GPIO.HIGH)
+		GPIO.output(4, GPIO.HIGH)
 		time.sleep(1)
+		print('initialize finished')
 		return(1)
 
 	def begin(self, mode=None):
@@ -303,6 +304,6 @@ if __name__ == '__main__':
 	time.sleep(1)
 	bno.setExternalCrystalUse(False)
 	while True:
-		print(bno.getVector(BNO055.VECTOR_GYROSCOPE))
-		time.sleep(0.01)
+		print(bno.getVector(BNO055.VECTOR_EULER))
+		time.sleep(0.1)
 

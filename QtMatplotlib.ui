@@ -51,6 +51,19 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="drive_to_click_button">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>60</height>
+        </size>
+       </property>
+       <property name="text">
+        <string>Drive to click</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="record_point_button">
        <property name="minimumSize">
         <size>
@@ -64,7 +77,7 @@
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="auto_mode_button">
+      <widget class="QPushButton" name="load_curve_button">
        <property name="minimumSize">
         <size>
          <width>0</width>
@@ -72,7 +85,7 @@
         </size>
        </property>
        <property name="text">
-        <string>Auto Mode</string>
+        <string>Load_Curve</string>
        </property>
       </widget>
      </item>
@@ -88,6 +101,19 @@
         </size>
        </property>
       </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="auto_mode_button">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>60</height>
+        </size>
+       </property>
+       <property name="text">
+        <string>Auto Mode</string>
+       </property>
+      </widget>
      </item>
     </layout>
    </widget>
