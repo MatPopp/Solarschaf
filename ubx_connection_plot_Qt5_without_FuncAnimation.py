@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import threading
 import time
+import os
 
 from PyQt5.QtWidgets import QWidget,QVBoxLayout,QMainWindow,QApplication
 from PyQt5.uic import loadUi
@@ -22,6 +23,8 @@ from PyQt5.QtCore import QTimer
 
     
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
+
+
 
 
 class MainWindow(QMainWindow):
@@ -32,34 +35,49 @@ class MainWindow(QMainWindow):
         
         
         self.mode='manual'
+        self.receiver_connected=False
         self.next_waypoint_index=0
         
         self.lat_list=[]
         self.long_list=[]
         
-        self.waypoint_lat_list=[]
+        self.long_0=11.011380329757094
+        self.lat_0=49.5856380908053
+        
+        self.x_list=[]
+        self.y_list=[]
+        
         self.waypoint_long_list=[]
+        self.waypoint_lat_list=[]
+        
+        self.waypoint_y_list=[]
+        self.waypoint_x_list=[]
         
         self.vx_list=[]
         self.vy_list=[]
+        
+        
         read_thread=threading.Thread(target=self.read_u_blox)
-        read_thread=threading.Thread(target=self.simulate_read)
-        
-        
         read_thread.start()
         
-        ## start plot loop. This cannot be in a seperate Thread since matplotlib can only be used in main thread
-        #self.plot_long_lat_with_loop()
-        self.init_plot_long_lat()
+        time.sleep(0.5)
+        if not self.receiver_connected:
+            print('could not connect to u-blox, start simulation')
+            read_thread=threading.Thread(target=self.simulate_read)
+            read_thread.start()
         
-        self.update_simulation_button.clicked.connect(self.init_plot_long_lat)
+        ## start plot loop. This cannot be in a seperate Thread since matplotlib can only be used in main thread
+        #self.plot_x_y_with_loop()
+        self.init_plot_x_y()
+        
+        self.update_simulation_button.clicked.connect(self.init_plot_x_y)
         self.record_point_button.clicked.connect(self.record_point)
         
         self.timer=QTimer()
-        self.timer.timeout.connect(self.update_plot_long_lat)
+        self.timer.timeout.connect(self.update_plot_x_y)
         self.timer.start(50)
         
-        #self.update_simulation_button.clicked.connect(self.update_plot_long_lat)
+        #self.update_simulation_button.clicked.connect(self.update_plot_x_y)
         
         
     def on_manual_mode_button_clicked(self):
@@ -69,7 +87,7 @@ class MainWindow(QMainWindow):
         
     def on_auto_mode_button_clicked(self):
         
-        if len(self.waypoint_long_list)>0:
+        if len(self.waypoint_x_list)>0:
             self.manual_mode_button.setStyleSheet("background-color: None")
             self.auto_mode_button.setStyleSheet("background-color: green")
             self.mode='auto'
@@ -77,27 +95,77 @@ class MainWindow(QMainWindow):
         
     def read_u_blox(self):
         
-        
-        stream = Serial('COM4', 9600, timeout=3)
-        ubr = UBXReader(stream)
-
-        while not keyboard.is_pressed('q'):
-            (raw_data, parsed_data) = ubr.read()
-            #print(parsed_data.identity)
-            if parsed_data.identity == "NAV-PVT":
-                #print(parsed_data)
-                print('lat:',parsed_data.lat*1e-7)
-                self.lat_list.append(parsed_data.lat*1e-7)
-                print('lon:',parsed_data.lon*1e-7)
-                self.long_list.append(parsed_data.lon*1e-7)
-                print('height:',parsed_data.height*1e-3)
-                print('height over mean sea level: ',parsed_data.hMSL*1e-3)
-                print('velocity north: ',parsed_data.velN*1e-3)
-                print('velocity east: ',parsed_data.velE*1e-3)
-                print('velocity down: ',parsed_data.velD*1e-3)
+        if os.name=='nt':      ## check for windows
+            print('system is nt, probably laptop')
+            try:
+                stream = Serial('COM4', 9600, timeout=3)
+                self.receiver_connected=True
+            except:
+                pass
+        elif os.name=='posix':
+            try:
+                stream = Serial('/dev/ttyACM0', 9600, timeout=3)   ## check for Linux
+                print('system is posix, probably laptop')
+                self.receiver_connected=True
+            except:
+                pass
+            
+        if self.receiver_connected:
+            ubr = UBXReader(stream)
+            
+            print('connection to UBX established')
+    
+            while not keyboard.is_pressed('q'):
+                (raw_data, parsed_data) = ubr.read()
+                #print(parsed_data.identity)
+                if parsed_data.identity == "NAV-PVT":
+                    #print(parsed_data)
+                    
+                    long=parsed_data.lon*1e-7
+                    print('lon:',long)
+                    self.long_list.append(parsed_data.lon*1e-7)
+                    
+                    lat=parsed_data.lat*1e-7
+                    print('lat:',lat)
+                    self.lat_list.append(lat)
+                    
+                    height=parsed_data.height*1e-3
+                    print('height:',height)
+                    
+                    print('height over mean sea level: ',parsed_data.hMSL*1e-3)
+                    
+                    self.x_0,self.y_0 = self.long_lat_height_to_x_y(self.long_list[0],self.lat_list[0],0)
+                    x_curr,y_curr = self.long_lat_height_to_x_y(long,lat,0)
+                    self.x_list.append(x_curr-self.x_0)
+                    self.y_list.append(y_curr-self.y_0)
+                    
+                    
+                    
+                    
+                    
+                    
+                    v_east = parsed_data.velE*1e-3
+                    print('velocity east: ',v_east)
+                    self.vx_list.append(v_east)
+                    print('velocity down: ',parsed_data.velD*1e-3)
+                    
+                    v_north=parsed_data.velN*1e-3
+                    print('velocity north: ',v_north)                    
+                    self.vy_list.append(v_north)
    
     
-
+    def long_lat_height_to_x_y(self,long,lat,height):
+        
+        phi = long/180*np.pi
+        phi_0 = self.long_0/180*np.pi
+        theta = (90-lat)/180*np.pi
+        theta_0 = (90-self.lat_0)/180*np.pi
+        r = 6371e3+height
+        
+        x= (r+height)*(phi-phi_0)*np.sin(theta)
+        y= (r+height)*(theta_0-theta)
+        
+        return(x,y)
         
     def simulate_read(self):
         
@@ -175,36 +243,39 @@ class MainWindow(QMainWindow):
                 self.sim_phi+=2*np.pi
             
             print('sim_phi',self.sim_phi)
-            self.long_list.append(self.sim_x)            
+            self.x_list.append(self.sim_x)            
+            self.y_list.append(self.sim_y)
+            
+            self.long_list.append(self.sim_x)
             self.lat_list.append(self.sim_y)
             
             self.vx_list.append(self.sim_vx)
             self.vy_list.append(self.sim_vy)
             
-          #  print('added lat, long ',self.lat_list[-1],self.long_list[-1])
+          #  print('added lat, long ',self.y_list[-1],self.x_list[-1])
           #  print('added vx, vy ',self.vx_list[-1],self.vy_list[-1])
             time.sleep(dt)
             
     def calculate_auto(self,delta_phi_turn=90/180*np.pi,d_min=0.1):
         self.d_min=d_min
         
-        if self.next_waypoint_index >= len(self.waypoint_lat_list):
+        if self.next_waypoint_index >= len(self.waypoint_y_list):
             self.next_waypoint_index =0
         
         
         ## calculate relative deviation        
         
-        self.delta_long=self.waypoint_long_list[self.next_waypoint_index]-self.long_list[-1]
-        self.delta_lat=self.waypoint_lat_list[self.next_waypoint_index]-self.lat_list[-1]
+        self.delta_x=self.waypoint_x_list[self.next_waypoint_index]-self.x_list[-1]
+        self.delta_y=self.waypoint_y_list[self.next_waypoint_index]-self.y_list[-1]
         
-        self.delta_abs = np.sqrt(self.delta_lat**2+self.delta_long**2)
+        self.delta_abs = np.sqrt(self.delta_y**2+self.delta_x**2)
         
         ## calculate angle
-        self.target_phi = np.arctan(self.delta_lat/self.delta_long)
-        if self.delta_long<0 and self.delta_lat>0:
+        self.target_phi = np.arctan(self.delta_y/self.delta_x)
+        if self.delta_x<0 and self.delta_y>0:
             self.target_phi+=np.pi
             
-        if self.delta_long<0 and self.delta_lat<0:
+        if self.delta_x<0 and self.delta_y<0:
             self.target_phi-=np.pi
          
         self.delta_phi=self.target_phi-self.sim_phi
@@ -217,7 +288,7 @@ class MainWindow(QMainWindow):
         
         
         
-       # print('delta_lat',self.delta_lat,'delta_long',self.delta_long)
+       # print('delta_y',self.delta_y,'delta_x',self.delta_x)
         print('next_waypoint_index',self.next_waypoint_index)
         print('phi',self.sim_phi,'target_phi',self.target_phi,'delta_phi',self.delta_phi)
         ## if angle is too high, just turn
@@ -249,12 +320,12 @@ class MainWindow(QMainWindow):
         
         
         
-    def init_plot_long_lat(self,blit=True):
+    def init_plot_x_y(self,blit=True):
         self.blit=blit
         
         
         
-        if len(self.lat_list)<2:
+        if len(self.y_list)<2:
             self.points, = self.plot_widget.canvas.axes.plot([0,1], [0,1], 'ro')
             self.line, = self.plot_widget.canvas.axes.plot([0,1],[0,1],linewidth=1,color='lightblue')
             
@@ -262,18 +333,20 @@ class MainWindow(QMainWindow):
             self.plot_widget.canvas.axes.set_ylim(-5, 5)
         
         else:
-            self.points, = self.plot_widget.canvas.axes.plot( self.long_list[-100::],self.lat_list[-100::], 'ro')
-            self.line, = self.plot_widget.canvas.axes.plot( self.long_list[-100::],self.lat_list[-100::],linewidth=1,color='lightblue')
+            self.points, = self.plot_widget.canvas.axes.plot( self.x_list[-100::],self.y_list[-100::], 'ro')
+            self.line, = self.plot_widget.canvas.axes.plot( self.x_list[-100::],self.y_list[-100::],linewidth=1,color='lightblue')
 #            self.plot_widget.canvas.axes.relim()
 #            self.plot_widget.canvas.axes.autoscale_view()
 #            self.plot_widget.canvas.axes.autoscale_view()
 #            self.plot_widget.canvas.axes.autoscale_view()
             
-            self.plot_widget.canvas.axes.set_xlim(min(self.long_list)-1,max(self.long_list)+1)
-            self.plot_widget.canvas.axes.set_ylim(min(self.lat_list)-1,max(self.lat_list)+1)
+            xrange=max(self.x_list)-min(self.x_list)
+            yrange=max(self.y_list)-min(self.y_list)
+            self.plot_widget.canvas.axes.set_xlim(min(self.x_list)-0.1*xrange,max(self.x_list)+0.1*xrange)
+            self.plot_widget.canvas.axes.set_ylim(min(self.y_list)-0.1*yrange,max(self.y_list)+0.1*yrange)
             self.plot_widget.canvas.draw()
-        self.plot_widget.canvas.axes.set_xlabel(r'$long$')
-        self.plot_widget.canvas.axes.set_ylabel(r'$lat$')
+        self.plot_widget.canvas.axes.set_xlabel(r'$x$ (m, Richtung Osten)')
+        self.plot_widget.canvas.axes.set_ylabel(r'$y$ (m, Richtung Norden)')
         
         
         self.arrow=self.plot_widget.canvas.axes.annotate('',xy=(0,1),xytext=(0,0),arrowprops={'arrowstyle':'->'})
@@ -282,20 +355,20 @@ class MainWindow(QMainWindow):
             self.axbackground = self.plot_widget.canvas.copy_from_bbox(self.plot_widget.canvas.axes.bbox)
       
         
-    def update_plot_long_lat(self):
+    def update_plot_x_y(self):
         
-        if len(self.lat_list)<100:
-            self.points.set_data(self.long_list,self.lat_list)
-            self.line.set_data(self.long_list,self.lat_list)
+        if len(self.y_list)<1000:
+            self.points.set_data(self.x_list,self.y_list)
+            self.line.set_data(self.x_list,self.y_list)
             
         else:
-            self.points.set_data(self.long_list[-100::],self.lat_list[-100::])
-            self.line.set_data(self.long_list[-100::],self.lat_list[-100::])
-        if len(self.lat_list)>2:
-           # self.plot_widget.canvas.axes.set_xlim(min(self.lat_list)-1,max(self.lat_list)+1)
-           # self.plot_widget.canvas.axes.set_ylim(min(self.long_list)-1,max(self.long_list)+1)
-            self.arrow.set_position((self.long_list[-1],self.lat_list[-1]))
-            self.arrow.xy=(self.long_list[-1]+self.vx_list[-1],self.lat_list[-1]+self.vy_list[-1])
+            self.points.set_data(self.x_list[-1000::],self.y_list[-1000::])
+            self.line.set_data(self.x_list[-1000::],self.y_list[-1000::])
+        if len(self.y_list)>2:
+           # self.plot_widget.canvas.axes.set_xlim(min(self.y_list)-1,max(self.y_list)+1)
+           # self.plot_widget.canvas.axes.set_ylim(min(self.x_list)-1,max(self.x_list)+1)
+            self.arrow.set_position((self.x_list[-1],self.y_list[-1]))
+            self.arrow.xy=(self.x_list[-1]+self.vx_list[-1],self.y_list[-1]+self.vy_list[-1])
             self.plot_widget.fig.canvas.draw()
             
             if self.blit:
@@ -314,16 +387,20 @@ class MainWindow(QMainWindow):
             else:
             # redraw everything
                 self.plot_widget.canvas.draw()
-                
+             
     def record_point(self):
         
         print('point recorded')
-        self.waypoint_long_list.append(self.long_list[-1])
         
+        
+        self.waypoint_x_list.append(self.x_list[-1])
+        self.waypoint_y_list.append(self.y_list[-1])
+        
+        self.waypoint_long_list.append(self.long_list[-1])
         self.waypoint_lat_list.append(self.lat_list[-1])
         
         
-        self.waypoints, = self.plot_widget.canvas.axes.plot( self.waypoint_long_list,self.waypoint_lat_list,'ro',markersize=10,color='blue')
+        self.waypoints, = self.plot_widget.canvas.axes.plot( self.waypoint_x_list,self.waypoint_y_list,'ro',markersize=10,color='blue')
         self.plot_widget.canvas.axes.draw_artist(self.waypoints)
         
         if self.blit:
